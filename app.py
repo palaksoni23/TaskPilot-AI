@@ -166,7 +166,7 @@ def get_client():
 
 def run_agent(client, messages):
     response = client.chat.completions.create(
-        model="llama-3.1-8b-instant",
+        model="llama-3.3-70b-versatile",
         messages=messages,
         tools=TOOLS_SCHEMA,
         tool_choice="auto",
@@ -191,7 +191,7 @@ def run_agent(client, messages):
                 "content": result,
             })
         follow_up = client.chat.completions.create(
-            model="llama-3.1-8b-instant",
+            model="llama-3.3-70b-versatile",
             messages=messages,
             max_tokens=900,
         )
