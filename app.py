@@ -164,9 +164,59 @@ def get_client():
     return Groq(api_key=api_key)
 
 
+# Candidate models in priority order — Groq frequently retires/renames models,
+# so we auto-detect a working one instead of hardcoding a single name.
+CANDIDATE_MODELS = [
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+    "openai/gpt-oss-20b",
+    "moonshotai/kimi-k2-instruct",
+    "qwen/qwen3-32b",
+    "gemma2-9b-it",
+]
+
+
+def get_working_model(client) -> str:
+    if "working_model" in st.session_state:
+        return st.session_state.working_model
+    try:
+        available = {m.id for m in client.models.list().data}
+    except Exception:
+        available = set()
+    for candidate in CANDIDATE_MODELS:
+        if not available or candidate in available:
+            st.session_state.working_model = candidate
+            return candidate
+    # Fall back to whatever the API reports as available
+    if available:
+        model = sorted(available)[0]
+        st.session_state.working_model = model
+        return model
+    st.session_state.working_model = CANDIDATE_MODELS[0]
+    return CANDIDATE_MODELS[0]
+
+
+def _chat_with_fallback(client, **kwargs):
+    """Try the cached model; if it 404s, walk through candidates and cache whichever works."""
+    model = get_working_model(client)
+    tried = set()
+    while True:
+        tried.add(model)
+        try:
+            return client.chat.completions.create(model=model, **kwargs)
+        except Exception as e:
+            if "model_not_found" not in str(e) and "does not exist" not in str(e):
+                raise
+            remaining = [m for m in CANDIDATE_MODELS if m not in tried]
+            if not remaining:
+                raise
+            model = remaining[0]
+            st.session_state.working_model = model
+
+
 def run_agent(client, messages):
-    response = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
+    response = _chat_with_fallback(
+        client,
         messages=messages,
         tools=TOOLS_SCHEMA,
         tool_choice="auto",
@@ -190,11 +240,7 @@ def run_agent(client, messages):
                 "name": fn_name,
                 "content": result,
             })
-        follow_up = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=messages,
-            max_tokens=900,
-        )
+        follow_up = _chat_with_fallback(client, messages=messages, max_tokens=900)
         final_msg = follow_up.choices[0].message.content
         messages.append({"role": "assistant", "content": final_msg})
         return final_msg
